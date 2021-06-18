@@ -162,3 +162,196 @@ def genGenQCMDPC(H):
     np.savetxt(filename, G, delimiter = ",", fmt = "%d")
     
     return G
+
+def genRandomVector(k, t):
+   
+    randomVector = np.zeros(k, dtype = np.int32)
+
+    # choisir t positions aléatoires parmi k positions
+    randomPositions = np.random.choice(k, t, replace=False)
+
+    # attribuer aux positions aléatoires la valeur 1
+    for j in randomPositions:
+        randomVector[j] = 1
+    
+    return randomVector
+
+def encryptMcEliece(G, m, e):
+    rows, cols = G.shape
+    n = cols
+    r = cols - rows
+    
+    #le chiffrement suit le document de recherche, texte chiffré = m * G + e
+    ciphertext = np.copy(np.add(np.matmul(m, G), e))
+    
+    ciphertext = convertBinary(ciphertext)
+
+    #Décommentez ceci pour vérifier si le cryptage est correct
+    #print("Plaintext : ", convertBinary(np.matmul(m, G)))
+    #print("Error     : ", randomError)
+    #print("Ciphertext: ", ciphertext)
+    
+    return ciphertext
+
+def bitFlipping(H, c, N):
+
+    print("\nStarting Bit-Flipping Algorithm...")
+    rows, cols = H.shape
+    
+    #Le graphe de Tanner de la matrice de contrôle de parité est représenté à l'aide de listes adjancency
+    bitsAdjList = [[] for i in range(cols)]
+    checksAdjList = [[] for i in range(rows)]
+    
+    #nœuds de bits et nœuds de contrôle, et initialisation d'autres paramètres
+    bits = np.copy(c)
+    checks = np.zeros(rows)
+    t = 0           #non. de tours
+    numOnes = 0     #compte non. de uns dans les nœuds de contrôle, si numOnes = 0, le mot de code est décodé
+    flipOrNot = 0   #utilisera le vote à la majorité pour décider si un morceau doit être retourné
+    checkSum = 0    #juste une variable intermédiaire pour le calcul
+    
+    for i in range(rows):
+        for j in range(cols):
+            if H[i, j] == 1:
+                bitsAdjList[j].append(i)
+                checksAdjList[i].append(j)
+    
+    while t < N:
+        #print("Bit-Flipping Decoding Round", t, ":")
+        for i in range(rows):
+            for j in checksAdjList[i]:
+                checkSum += bits[j]
+            checks[i] = checkSum % 2
+            checkSum = 0
+            if checks[i] == 1:
+                numOnes += 1
+
+        if numOnes == 0:
+            break
+        else:
+            numOnes = 0
+        
+        for i in range(cols):
+            for j in bitsAdjList[i]:
+                if checks[j] == 1:
+                    flipOrNot += 1
+            if 2*flipOrNot > len(bitsAdjList[i]):
+                bits[i] = (bits[i] + 1) % 2
+            flipOrNot = 0
+
+        t += 1
+                
+    if t < N:
+        print("Decoded in", t, "step(s).")
+        
+        return bits
+    else:
+        print("Cannot decode")
+    
+    return 0
+
+def decryptMcEliece(H, y, method, N):
+  
+    r, n = H.shape
+    #Décryptage
+    decryptedText = bitFlipping(H, y, N)
+        
+    if type(decryptedText) == int:
+        print("Cannot decode by Bit-Flipping algorithm")
+    else :
+        decryptedText = decryptedText[0: n - r]
+            
+    return decryptedText
+
+def decryptSuccess(plaintext, decryptedText):
+
+    status = np.array_equal(plaintext, decryptedText)
+    if (status == True):
+        print("Succès du décryptage!")
+    else:
+        print("Échec du décryptage!")
+        
+    return status
+
+def demo(H, y):
+    print("H:\n", H)
+    r, n = H.shape
+    w = sum(H[0,:] == 1)
+    d = w // 2
+    iteration = 1
+    flipped = 1
+
+    s = convertBinary(np.matmul(y, np.transpose(H)))
+    print("\ntext chiffre:", y)
+    print("seuil T:", d)
+    print("\n######### Démarrage de l'algorithme de Bit-Flipping... #########\n")
+
+    print("s = yH^T:", s)
+    while (np.count_nonzero(s) > 0 and flipped == 1):
+        flipped = 0
+        # syndrome weight
+        T = 1
+
+        for j in range(n):
+            if (sum((s + H[:,j]) == 2)) >= T * d:
+                print("FLIPPED position %d" % j)
+                print("y:", y)
+                y[j] = y[j] ^ 1
+                
+                s = convertBinary(np.matmul(y, np.transpose(H)))
+                print("s = yH^T:", s)
+                flipped = 1 
+        iteration += 1
+        # syndrome
+        s = np.matmul(y, np.transpose(H))
+        s = convertBinary(s)
+
+    print("test Dechiffre:\n", y)
+    if (sum(s == 1) == 0):
+        return y[0: n-r]
+    else:
+        print("Cannot decode")
+        return 0
+    
+    
+##################################### Setting parameters ###################################
+
+# code parameters
+n0 = 2
+r = 5
+wi = 3
+
+N = 20
+k = r // 2
+#decryption parameters
+t = 1
+
+################################## Processing parameters ###################################
+
+n = n0 * r
+w = wi * n0
+
+##################################### Testing functions ####################################
+
+# generate a random (n,r,w)-QC-MDPC matrix H
+H = genQCMDPC(n, r, w)
+
+# Generate the corresponding generator matrix G
+G = genGenQCMDPC(H)
+print("G:\n", G)
+# generate a random message m of weight k
+m = genRandomVector(r, k)
+
+print("\Texte en clair m:", m)
+
+# generate a random error vector e of weight t
+e = genRandomVector(n, t)
+
+# encrypt the message m
+y = encryptMcEliece(G, m, e)
+
+# decrypt the ciphertext
+decryptedText = demo(H, y)
+
+# check if decryption is correct
+decryptSuccess(m, decryptedText)
